@@ -238,3 +238,23 @@ h3 { font-size: 17px; }
 .stage .photo.big span, .stage.photo-on .hint { display: none; }
 .stage.photo-on > canvas { visibility: hidden; }
 .photo-pane .btn { white-space: nowrap; padding: 0 8px; }
+
+/* ---------- pattern form + PDF viewer ---------- */
+.rchips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.rchip { position: relative; min-width: 0; }
+.rchip input { position: absolute; opacity: 0; inset: 0; margin: 0; }
+.rchip span { display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; padding: 0 8px; border-radius: 999px; background: #fff; border: 2px solid var(--rose); font-weight: 600; font-size: 13.5px; white-space: nowrap; }
+.rchip i { width: 11px; height: 11px; border-radius: 50%; flex: none; }
+.rchip input:checked + span { background: var(--maroon); border-color: var(--maroon); color: #fff; }
+.rchip input:focus-visible + span { outline: 3px solid var(--orange); outline-offset: 2px; }
+.attach { display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 0 18px; border: 2.5px dashed var(--rose); border-radius: 16px; background: rgba(255, 255, 255, .7); font-weight: 600; font-size: 16px; cursor: pointer; }
+.attach svg { width: 26px; height: 26px; fill: none; stroke: var(--maroon); stroke-width: 1.8; stroke-linejoin: round; flex: none; }
+.attach span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item .cover { width: 44px; height: 56px; object-fit: cover; border-radius: 8px; border: 1.5px solid var(--pink); flex: none; background: #fff; }
+.viewer { position: fixed; inset: 0; z-index: 50; background: #e9e2de; display: flex; flex-direction: column; }
+.viewer header { flex: none; display: flex; align-items: center; gap: 10px; padding: calc(var(--safe-t) + 8px) 12px 8px; background: var(--cream); border-bottom: 1.5px solid var(--pink); }
+.viewer header b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--display); font-weight: 400; font-size: 17px; }
+.viewer header .round { width: 42px; height: 42px; background: #fff; }
+.viewer .pages { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; padding: 10px 0 calc(var(--safe-b) + 16px); --z: 1; }
+.viewer .pg { width: calc((100% - 20px) * var(--z)); margin: 0 10px 10px; background: #fff; box-shadow: 0 1px 6px rgba(0, 0, 0, .15); }
+.viewer .pg canvas { display: block; width: 100%; height: 100%; }

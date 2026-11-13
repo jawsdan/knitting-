@@ -1,6 +1,6 @@
 // Offline support: serve from cache, refresh the cache in the background.
-const CACHE = 'knitnook-v2';
-const FILES = ['./', 'index.html', 'css/style.css', 'js/app.js', 'js/studio.js', 'js/photo.js',
+const CACHE = 'knitnook-v3';
+const FILES = ['./', 'index.html', 'css/style.css', 'js/app.js', 'js/studio.js', 'js/photo.js', 'js/pdf.js', 'vendor/pdf.min.mjs', 'vendor/pdf.worker.min.mjs',
   'vendor/three.module.min.js', 'fonts/bowlby-one.woff2', 'manifest.webmanifest', 'icons/icon-192.png'];
 
 self.addEventListener('install', (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)).then(() => self.skipWaiting())));

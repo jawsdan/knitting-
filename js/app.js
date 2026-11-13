@@ -19,6 +19,8 @@ let tab = 'home', studio = null, ui = { stash: 'yarn', q: '', sort: 'new', mode:
 
 /* ---------- icons ---------- */
 const I = {
+  close: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+  minus: '<svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg>',
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
   gear: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.300l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2.2-1.300L14 3h-4l-.4 2.500a7 7 0 0 0-2.2 1.300l-2.3-1-2 3.4 2 1.500a7 7 0 0 0 0 2.600l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2.2 1.300L10 21h4l.4-2.500a7 7 0 0 0 2.2-1.300l2.3 1 2-3.4-2-1.500c.1-.4.1-.9.1-1.300z"/></svg>',
   search: '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>',
@@ -148,18 +150,103 @@ function editTool(t) {
     onDelete: t ? () => { db.tools = db.tools.filter((x) => x !== t); } : null,
   });
 }
+/* ---------- pattern PDFs (kept in IndexedDB; too big for localStorage) ---------- */
+const idb = () => new Promise((res, rej) => {
+  const r = indexedDB.open('knitnook', 1);
+  r.onupgradeneeded = () => r.result.createObjectStore('files');
+  r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+});
+const fileOp = async (mode, fn) => {
+  const d = await idb();
+  return new Promise((res, rej) => { const tx = d.transaction('files', mode), rq = fn(tx.objectStore('files')); tx.oncomplete = () => { d.close(); res(rq.result); }; tx.onerror = tx.onabort = () => { d.close(); rej(tx.error); }; });
+};
+const filePut = (k, buf) => fileOp('readwrite', (st) => st.put(buf, k));
+const fileGet = (k) => fileOp('readonly', (st) => st.get(k));
+const fileDel = (k) => fileOp('readwrite', (st) => st.delete(k));
+
+async function openPdf(p, buf) {
+  try { buf = buf || await fileGet(p.id); } catch { buf = null; }
+  if (!buf) { toast('The PDF for this pattern is not on this device'); return; }
+  const el = document.createElement('div'); el.className = 'viewer';
+  el.innerHTML = `<header><button class="round" data-x aria-label="Close">${I.close}</button><b>${esc(p.name || 'Pattern')}</b><span class="row"><button class="round" data-z="-1" aria-label="Zoom out">${I.minus}</button><button class="round" data-z="1" aria-label="Zoom in">${I.plus}</button></span></header><div class="pages"><p class="sub it">Opening the PDF…</p></div>`;
+  document.body.append(el);
+  const box = $('.pages', el); let zoom = 1, handle = null;
+  el.addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    if ('x' in b.dataset) { handle?.close(); el.remove(); }
+    if (b.dataset.z) { zoom = Math.max(1, Math.min(3, zoom + Number(b.dataset.z) * 0.5)); box.style.setProperty('--z', zoom); }
+  });
+  try {
+    const { view } = await import('./pdf.js');
+    box.innerHTML = '';
+    handle = await view(buf, box);
+    if (!el.isConnected) handle.close();
+  } catch { box.innerHTML = '<p class="sub">This PDF could not be opened.</p>'; }
+}
+
+const LEVELS = [['Unspecified', '#9a9a9a'], ['Beginner', '#7cc4ee'], ['Easy', '#8ddc8a'], ['Intermediate', '#f5d21f'], ['Advanced', '#f5a623'], ['Expert', '#ef5b45']];
+const CATEGORIES = ['Sweater', 'Cardigan', 'Top', 'Hat', 'Socks', 'Scarf or shawl', 'Mittens', 'Blanket', 'Toy', 'Other'];
 function editPattern(p) {
-  formSheet({
-    title: p ? 'Edit pattern' : 'Add pattern', value: p,
-    fields: [
-      { key: 'name', label: 'Pattern name', ph: 'Everyday pullover', req: true },
-      { key: 'designer', label: 'Designer', half: true },
-      { key: 'kind', label: 'Type', type: 'select', options: ['Sweater', 'Cardigan', 'Hat', 'Socks', 'Scarf', 'Mittens', 'Other'], half: true },
-      { key: 'link', label: 'Link', type: 'url', ph: 'https://…' },
-      { key: 'notes', label: 'Notes', type: 'textarea' },
-    ],
-    onSave: (o) => { if (p) Object.assign(p, o); else db.patterns.push({ id: uid(), at: Date.now(), ...o }); toast('Pattern saved'); },
-    onDelete: p ? () => { db.patterns = db.patterns.filter((x) => x !== p); } : null,
+  const v = p || { craft: 'Knitting', kind: 'Other', level: 'Unspecified' };
+  let pdf; // undefined = unchanged, null = removed, object = newly attached
+  const radios = (name, opts, cur) => `<div class="rchips">${opts.map(([o, dot]) => `<label class="rchip"><input type="radio" name="${name}" value="${o}" ${o === (cur || opts[0][0]) ? 'checked' : ''}><span>${dot ? `<i style="background:${dot}"></i>` : ''}${o}</span></label>`).join('')}</div>`;
+  const text = (key, label, ph, area) => `<label class="field">${label}${area ? `<textarea id="f-${key}" name="${key}" rows="2" placeholder="${esc(ph)}">${esc(v[key] || '')}</textarea>` : `<input id="f-${key}" name="${key}" value="${esc(v[key] || '')}" placeholder="${esc(ph)}" autocomplete="off">`}</label>`;
+  sheet(`<h2>${p ? 'Edit pattern' : 'Add pattern'}</h2><form class="stack">
+    <label class="field">Pattern name *<input id="f-name" name="name" required value="${esc(v.name || '')}" placeholder="e.g., Cozy Cable Sweater" autocomplete="off"></label>
+    ${text('designer', 'Designer', 'e.g., your name or the pattern designer')}
+    <div class="field">Pattern PDF (optional)
+      <label class="attach" for="f-pdf"><svg viewBox="0 0 24 24"><path d="M6 3h8l5 5v13H6zM14 3v5h5"/></svg><span id="pdf-label"></span></label>
+      <input type="file" id="f-pdf" accept="application/pdf,.pdf" hidden>
+      <div class="row" id="pdf-actions"></div></div>
+    <div class="field">Craft${radios('craft', [['Knitting'], ['Crochet'], ['Other']], v.craft)}</div>
+    <label class="field">Category<select id="f-kind" name="kind">${CATEGORIES.map((o) => `<option${o === v.kind ? ' selected' : ''}>${o}</option>`).join('')}</select></label>
+    <div class="field">Difficulty${radios('level', LEVELS, v.level)}</div>
+    ${text('notes', 'Description', 'Describe your pattern…', true)}
+    ${text('sizes', 'Sizes', 'e.g., XS, S, M, L, XL (default: one size)')}
+    ${text('gauge', 'Gauge', 'e.g., 20 sts x 28 rows = 10 cm in stockinette')}
+    ${text('yarn', 'Yarn / materials', 'Yarn weight, quantities, fibers, or a specific yarn', true)}
+    ${text('tools', 'Tools', 'Needles, hooks, stitch markers…')}
+    <label class="field">Link<input id="f-link" name="link" type="url" value="${esc(v.link || '')}" placeholder="https://…" autocomplete="off"></label>
+    <button class="btn block" type="submit">${p ? 'Save' : 'Add pattern'}</button>
+    ${p ? '<button class="btn sm danger block" type="button" data-del>Delete</button>' : ''}</form>`, (el, close) => {
+    const paint = () => {
+      const cur = pdf === undefined ? p?.pdf : pdf;
+      $('#pdf-label', el).textContent = cur ? `${cur.name} · ${cur.pages} page${cur.pages === 1 ? '' : 's'}` : 'Attach PDF';
+      $('#pdf-actions', el).innerHTML = cur ? '<button class="btn sm grow" type="button" data-open>Open PDF</button><button class="btn sm ghost grow" type="button" data-rm>Remove PDF</button>' : '';
+    };
+    paint();
+    $('#f-pdf', el).onchange = async (e) => {
+      const f = e.target.files[0]; if (!f) return;
+      if (f.size > 60e6) { toast('That PDF is over 60 MB, which is too big to keep on the phone'); return; }
+      $('#pdf-label', el).textContent = 'Reading the PDF…';
+      try {
+        const buf = await f.arrayBuffer(), { cover } = await import('./pdf.js'), info = await cover(buf);
+        pdf = { buf, name: f.name, pages: info.pages, thumb: info.thumb };
+        const name = $('#f-name', el);
+        if (!name.value.trim()) name.value = info.title || f.name.replace(/\.pdf$/i, '').replace(/[_-]+/g, ' ');
+      } catch { toast('That file could not be read as a PDF'); }
+      e.target.value = ''; paint();
+    };
+    el.addEventListener('click', (e) => {
+      if ('rm' in e.target.dataset) { pdf = null; paint(); }
+      if ('open' in e.target.dataset) openPdf({ id: p?.id, name: $('#f-name', el).value }, pdf?.buf);
+    });
+    $('form', el).addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const o = Object.fromEntries(new FormData(e.target)), rec = p || { id: uid(), at: Date.now() };
+      Object.assign(rec, o);
+      try {
+        if (pdf) { await filePut(rec.id, pdf.buf); rec.pdf = { name: pdf.name, pages: pdf.pages }; rec.thumb = pdf.thumb; navigator.storage?.persist?.(); }
+        if (pdf === null) { await fileDel(rec.id); delete rec.pdf; delete rec.thumb; }
+      } catch { toast('The PDF could not be saved. The phone may be out of space.'); return; }
+      if (!p) db.patterns.push(rec);
+      close(); save(); render(); toast(p ? 'Pattern saved' : 'Pattern added');
+    });
+    const del = $('[data-del]', el);
+    del?.addEventListener('click', () => {
+      if (!del.dataset.sure) { del.dataset.sure = 1; del.textContent = 'Tap again to delete'; return; }
+      fileDel(p.id).catch(() => {}); db.patterns = db.patterns.filter((x) => x !== p); close(); save(); render();
+    });
   });
 }
 function settings() {
@@ -229,14 +316,15 @@ const screens = {
       <div class="head"><h1 style="text-align:left">Patterns</h1><button class="round" id="add" aria-label="Add pattern">${I.plus}</button></div>
       ${searchBar('Search patterns')}
       <h2>My Patterns</h2>
-      ${list.length ? `<div class="list">${list.map((p) => `<button class="card item" data-id="${p.id}"><span class="dot">${I.book}</span><span class="txt"><b>${esc(p.name)}</b><span>${esc([p.designer, p.kind].filter(Boolean).join(' · '))}</span></span></button>`).join('')}</div>`
-        : `<div class="card promo"><div class="grow"><h3>${ui.q ? 'Nothing matches' : 'No patterns yet'}</h3><p>Save the patterns you own or want to knit, with a link and notes.</p><button class="btn sm" id="add2">Add pattern</button></div></div>`}
+      ${list.length ? `<div class="list">${list.map((p) => `<div class="card item"><button class="item grow" data-id="${p.id}">${p.thumb ? `<img class="cover" src="${p.thumb}" alt="">` : `<span class="dot">${I.book}</span>`}<span class="txt"><b>${esc(p.name)}</b><span>${esc([p.designer, p.kind, p.level && p.level !== 'Unspecified' ? p.level : ''].filter(Boolean).join(' · '))}</span></span></button>${p.pdf ? `<button class="btn sm" data-pdf="${p.id}" aria-label="Open the PDF for ${esc(p.name)}">PDF</button>` : ''}</div>`).join('')}</div>`
+        : `<div class="card promo"><div class="grow"><h3>${ui.q ? 'Nothing matches' : 'No patterns yet'}</h3><p>Add a pattern and attach its PDF to read it here while you knit.</p><button class="btn sm" id="add2">Add pattern</button></div></div>`}
       <div class="head"><h2>My Designs</h2><button class="btn sm ghost" data-go="studio">Open studio</button></div>
       ${db.designs.length ? `<div class="grid2">${db.designs.slice().reverse().map((d) => `<button class="design" data-d="${d.id}"><img src="${d.thumb}" alt=""><b>${esc(d.name)}</b></button>`).join('')}</div>`
         : '<p class="muted">Sweaters you save in the studio show up here.</p>'}
     </div>`;
     $('#add').onclick = () => editPattern(); if ($('#add2')) $('#add2').onclick = () => editPattern();
     $$('[data-id]').forEach((b) => (b.onclick = () => editPattern(db.patterns.find((p) => p.id === b.dataset.id))));
+    $$('[data-pdf]').forEach((b) => (b.onclick = () => openPdf(db.patterns.find((p) => p.id === b.dataset.pdf))));
     $$('[data-d]').forEach((b) => (b.onclick = () => openDesign(db.designs.find((d) => d.id === b.dataset.d))));
     bindSearch();
   },
