@@ -6,7 +6,7 @@ const hex = (c) => '#' + c.map((v) => Math.max(0, Math.min(255, Math.round(v))).
 const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
 const median = (a) => a.sort((x, y) => x - y)[a.length >> 1];
 
-export function loadPhoto(file, max = 300) {
+export function loadPhoto(file, max = 900) {
   return new Promise((res, rej) => {
     const url = URL.createObjectURL(file), img = new Image();
     img.onload = () => {
@@ -19,15 +19,6 @@ export function loadPhoto(file, max = 300) {
     img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('bad image')); };
     img.src = url;
   });
-}
-
-export function colorAt(canvas, fx, fy) {
-  const x = Math.round(fx * (canvas.width - 1)), y = Math.round(fy * (canvas.height - 1));
-  const x0 = Math.max(0, x - 2), y0 = Math.max(0, y - 2), w = Math.min(canvas.width - x0, 5), h = Math.min(canvas.height - y0, 5);
-  const d = canvas.getContext('2d', { willReadFrequently: true }).getImageData(x0, y0, w, h).data;
-  const s = [0, 0, 0];
-  for (let i = 0; i < d.length; i += 4) { s[0] += d[i]; s[1] += d[i + 1]; s[2] += d[i + 2]; }
-  return hex(s.map((v) => v / (d.length / 4)));
 }
 
 export function analyze(canvas) {
@@ -99,6 +90,48 @@ export function analyze(canvas) {
   const main = palette[rows[0]] || palette[0];
   const collar = avg(band(0.02, 0.09)), hem = avg(band(0.93, 0.99));
   const zones = { body: palette[0], sleeves: palette[0], collar: collar ? hex(collar) : main, hem: hem ? hex(hem) : palette[rows[PATTERN_ROWS - 1]], cuffs: hem ? hex(hem) : palette[rows[PATTERN_ROWS - 1]] };
-  if (palette.length === 1) { zones.body = zones.sleeves = palette[0]; return { pattern: null, zones }; }
-  return { pattern: { kind: 'photo', rows, palette }, zones };
+  // label every garment pixel with its nearest palette color so the photo itself can be recolored
+  const means = keep.map((i) => cents[i]), pix = new Uint8Array(W * H).fill(255);
+  const areas = palette.length === 1 ? ['body'] : palette.map((_, i) => 'p' + i), segPal = palette.slice();
+  // collar and hem become their own areas when their color differs from the body colors
+  const half = y0 + bh / 2, where = [];
+  for (const [c, area, top] of [[collar, 'collar', true], [hem, 'hem', false]]) {
+    if (c && means.slice(0, palette.length).every((k) => dist(k, c) > 40)) { means.push(c); areas.push(area); segPal.push(hex(c)); where.push(top); }
+  }
+  for (let i = 0; i < W * H; i++) {
+    if (!fg[i]) continue;
+    const p = [d[i * 4], d[i * 4 + 1], d[i * 4 + 2]], y = (i / W) | 0;
+    let bi = 255, bd = 95;
+    for (let k = 0; k < means.length; k++) {
+      if (k >= palette.length && where[k - palette.length] !== (y < half)) continue;
+      const dd = dist(means[k], p); if (dd < bd) { bd = dd; bi = k; }
+    }
+    pix[i] = bi;
+  }
+  const seg = { labels: pix, means, areas, palette: segPal, orig: new ImageData(new Uint8ClampedArray(d), W, H) };
+  if (palette.length === 1) { zones.body = zones.sleeves = palette[0]; return { pattern: null, zones, seg }; }
+  return { pattern: { kind: 'photo', rows, palette }, zones, seg };
+}
+
+const rgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+const lum = (c) => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+
+// Repaint the photo: each labelled area takes its new color, keeping the original light and shadow.
+export function recolor(canvas, seg, colors) {
+  const out = new ImageData(new Uint8ClampedArray(seg.orig.data), seg.orig.width, seg.orig.height), o = out.data;
+  const target = colors.map((c, i) => (c && c.toLowerCase() !== seg.palette[i] ? rgb(c) : null));
+  const ml = seg.means.map(lum);
+  for (let i = 0; i < seg.labels.length; i++) {
+    const k = seg.labels[i], t = target[k];
+    if (!t) continue;
+    const j = i * 4, l = lum([o[j], o[j + 1], o[j + 2]]), m = ml[k];
+    if (l <= m) { const f = l / (m || 1); o[j] = t[0] * f; o[j + 1] = t[1] * f; o[j + 2] = t[2] * f; }
+    else { const f = Math.min(1, (l - m) / (256 - m)); o[j] = t[0] + (255 - t[0]) * f; o[j + 1] = t[1] + (255 - t[1]) * f; o[j + 2] = t[2] + (255 - t[2]) * f; }
+  }
+  canvas.getContext('2d').putImageData(out, 0, 0);
+}
+
+export function labelAt(canvas, seg, fx, fy) {
+  const x = Math.min(canvas.width - 1, Math.max(0, Math.round(fx * canvas.width))), y = Math.min(canvas.height - 1, Math.max(0, Math.round(fy * canvas.height)));
+  return seg.labels[y * canvas.width + x];
 }

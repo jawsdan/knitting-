@@ -1,5 +1,5 @@
 // Offline support: serve from cache, refresh the cache in the background.
-const CACHE = 'knitnook-v1';
+const CACHE = 'knitnook-v2';
 const FILES = ['./', 'index.html', 'css/style.css', 'js/app.js', 'js/studio.js', 'js/photo.js',
   'vendor/three.module.min.js', 'fonts/bowlby-one.woff2', 'manifest.webmanifest', 'icons/icon-192.png'];
 

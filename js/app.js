@@ -251,7 +251,7 @@ function openDesign(d) {
     <button class="btn sm danger block" data-a="del">Delete</button>`, (el, close) => {
     el.addEventListener('click', (e) => {
       const a = e.target.dataset.a; if (!a) return;
-      if (a === 'open') { db.current = structuredClone(d.design); ui.photo = null; save(); close(); go('studio'); }
+      if (a === 'open') { db.current = structuredClone(d.design); ui.photo = null; ui.seg = null; save(); close(); go('studio'); }
       if (a === 'project') { close(); editProject(null, { name: d.name }); }
       if (a === 'del') {
         if (!e.target.dataset.sure) { e.target.dataset.sure = 1; e.target.textContent = 'Tap again to delete'; return; }
@@ -271,13 +271,22 @@ function areas() {
   if (!d.pattern) return [{ id: 'body', label: 'Body', color: d.zones.body }, { id: 'sleeves', label: 'Sleeves', color: d.zones.sleeves }, ...ribs];
   return [...d.pattern.palette.map((c, i) => ({ id: 'p' + i, label: 'Stripe ' + (i + 1), color: c })), ...ribs];
 }
-function setColor(hex) {
+function paintPhoto() {
+  if (!ui.photo || !ui.seg) return;
   const d = db.current;
-  if (ui.area === 'all') { for (const z in d.zones) d.zones[z] = hex; if (d.pattern) d.pattern = null; }
+  const colors = ui.seg.areas.map((a) => (a[0] === 'p' || a === 'body'
+    ? (d.pattern ? d.pattern.palette[(Number(a.slice(1)) || 0) % d.pattern.palette.length] : d.zones.body) : d.zones[a]));
+  import('./photo.js').then(({ recolor }) => recolor(ui.photo, ui.seg, colors));
+}
+const refresh = () => { studio?.applyColors(); paintPhoto(); };
+function putColor(hex) {
+  const d = db.current;
+  if (ui.area === 'all') { for (const z in d.zones) d.zones[z] = hex; d.pattern = null; }
   else if (ui.area[0] === 'p' && d.pattern) d.pattern.palette[Number(ui.area.slice(1))] = hex;
   else d.zones[ui.area] = hex;
-  save(); studio?.applyColors(); panel();
+  refresh();
 }
+function setColor(hex) { putColor(hex); save(); panel(); }
 function setPattern(kind) {
   const d = db.current, R = 48;
   const base = d.pattern ? d.pattern.palette[0] : d.zones.body;
@@ -287,7 +296,24 @@ function setPattern(kind) {
     const rows = Array.from({ length: R }, (_, i) => (kind === 'stripes' ? Math.floor(i / 4) % 2 : kind === 'wide' ? Math.floor(i / 9) % 2 : i < 19 ? 0 : 1));
     d.pattern = { kind, rows, palette: [base, second] }; ui.area = 'p1';
   }
-  save(); studio?.applyColors(); panel();
+  save(); refresh(); panel();
+}
+
+function colorRows(list) {
+  const cur = (list.find((a) => a.id === ui.area) || {}).color?.toLowerCase();
+  return `<div class="scroller" role="tablist" aria-label="Area to color">
+      <button class="chip ${ui.area === 'all' ? 'on' : ''}" data-a="all">Whole sweater</button>
+      ${list.map((a) => `<button class="chip ${a.id === ui.area ? 'on' : ''}" data-a="${a.id}"><i style="background:${esc(a.color)}"></i>${a.label}</button>`).join('')}</div>
+    <div class="scroller"><label class="sw custom" title="Any color"><input type="color" id="st-custom" value="${esc(cur || '#7f9fe0')}" aria-label="Pick any color"></label>
+      ${SWATCHES.map((c) => `<button class="sw ${c === cur ? 'on' : ''}" data-c="${c}" style="background:${c}" aria-label="Color ${c}"></button>`).join('')}</div>`;
+}
+function bindColorRows(body) {
+  $$('[data-a]', body).forEach((b) => (b.onclick = () => { ui.area = b.dataset.a; panel(); }));
+  $$('[data-c]', body).forEach((b) => (b.onclick = () => setColor(b.dataset.c)));
+  const custom = $('#st-custom');
+  custom.oninput = () => putColor(custom.value); // live, without rebuilding the panel (keeps the picker open)
+  custom.onchange = () => { save(); panel(); };
+  $('.chip.on', body)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
 
 function panel() {
@@ -295,73 +321,78 @@ function panel() {
   const d = db.current, list = areas();
   if (ui.area !== 'all' && !list.some((a) => a.id === ui.area)) ui.area = list[0].id;
   $$('.modes button').forEach((b) => b.classList.toggle('on', b.dataset.m === ui.mode));
-  $('.photo')?.classList.toggle('big', ui.mode === 'photo');
+  const big = ui.mode === 'photo' && !!ui.photo;
+  $('.photo')?.classList.toggle('big', big);
+  $('#stage')?.classList.toggle('photo-on', big);
   if (ui.mode === 'colors') {
-    const cur = (list.find((a) => a.id === ui.area) || {}).color?.toLowerCase();
     const kind = d.pattern?.kind || 'solid';
-    body.innerHTML = `<div class="scroller" role="tablist" aria-label="Area to color">
-        <button class="chip ${ui.area === 'all' ? 'on' : ''}" data-a="all">Whole sweater</button>
-        ${list.map((a) => `<button class="chip ${a.id === ui.area ? 'on' : ''}" data-a="${a.id}"><i style="background:${esc(a.color)}"></i>${a.label}</button>`).join('')}</div>
-      <div class="scroller"><label class="sw custom" title="Any color"><input type="color" id="st-custom" value="${esc(cur || '#7f9fe0')}" aria-label="Pick any color"></label>
-        ${SWATCHES.map((c) => `<button class="sw ${c === cur ? 'on' : ''}" data-c="${c}" style="background:${c}" aria-label="Color ${c}"></button>`).join('')}</div>
-      <div class="opt"><span>Pattern</span><div class="seg">${[['solid', 'Solid'], ['stripes', 'Stripes'], ['wide', 'Wide'], ['block', 'Block']].map(([k, l]) => `<button data-k="${k}" class="${k === kind ? 'on' : ''}">${l}</button>`).join('')}</div></div>`;
-    $$('[data-a]', body).forEach((b) => (b.onclick = () => { ui.area = b.dataset.a; panel(); }));
-    $$('[data-c]', body).forEach((b) => (b.onclick = () => setColor(b.dataset.c)));
+    body.innerHTML = colorRows(list) + `<div class="opt"><span>Pattern</span><div class="seg">${[['solid', 'Solid'], ['stripes', 'Stripes'], ['wide', 'Wide'], ['block', 'Block']].map(([k, l]) => `<button data-k="${k}" class="${k === kind ? 'on' : ''}">${l}</button>`).join('')}</div></div>`;
     $$('[data-k]', body).forEach((b) => (b.onclick = () => setPattern(b.dataset.k)));
-    const custom = $('#st-custom');
-    custom.oninput = () => { // live update without rebuilding the panel (keeps the picker open)
-      const dd = db.current;
-      if (ui.area === 'all') { for (const z in dd.zones) dd.zones[z] = custom.value; dd.pattern = null; }
-      else if (ui.area[0] === 'p' && dd.pattern) dd.pattern.palette[Number(ui.area.slice(1))] = custom.value;
-      else dd.zones[ui.area] = custom.value;
-      studio?.applyColors();
-    };
-    custom.onchange = () => { save(); panel(); };
-    $('.chip.on', body)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    bindColorRows(body);
   } else if (ui.mode === 'shape') {
     const seg = (label, key, opts) => `<div class="opt"><span>${label}</span><div class="seg">${opts.map(([k, l]) => `<button data-key="${key}" data-v="${k}" class="${d[key] === k ? 'on' : ''}">${l}</button>`).join('')}</div></div>`;
     body.innerHTML = seg('Fit', 'fit', [['slim', 'Slim'], ['regular', 'Regular'], ['oversized', 'Oversized']])
       + seg('Length', 'length', [['cropped', 'Cropped'], ['regular', 'Regular'], ['long', 'Long']])
       + seg('Neck', 'neck', [['crew', 'Crew neck'], ['turtle', 'Turtleneck']]);
     $$('[data-key]', body).forEach((b) => (b.onclick = () => { d[b.dataset.key] = b.dataset.v; save(); studio?.build(); panel(); }));
+  } else if (ui.photo) {
+    body.innerHTML = colorRows(list) + `<div class="photo-pane"><div class="row">
+      <label class="btn sm ghost grow" for="st-file">New photo</label><button class="btn sm ghost grow" id="st-orig">Reset</button><button class="btn sm grow" id="st-dl">Save</button></div>
+      <input type="file" id="st-file" accept="image/*" hidden></div>`;
+    bindColorRows(body);
+    $('#st-file').onchange = (e) => e.target.files[0] && usePhoto(e.target.files[0]);
+    $('#st-orig').onclick = () => applyPhoto();
+    $('#st-dl').onclick = savePhoto;
   } else {
-    const label = ui.area === 'all' ? 'the whole sweater' : (list.find((a) => a.id === ui.area) || list[0]).label.toLowerCase();
     body.innerHTML = `<div class="photo-pane">
-      <p>${ui.photo ? `Colors and stripes were read from your photo. Tap a spot on the photo to use that color for <b>${label}</b>, or tap a part of the sweater to choose another area.` : 'Upload a photo of a sweater. The app reads its colors and stripes and puts them on the 3D model, so you can then recolor each area.'}</p>
-      <div class="row"><label class="btn sm grow" for="st-file">${ui.photo ? 'Use another photo' : 'Upload a photo'}</label>
-      ${ui.photo ? '<button class="btn sm ghost" id="st-reread">Read again</button>' : ''}</div>
+      <p>Upload a photo of a sweater. Tap a part of it, pick a color, and the photo is recolored with the same colors as the 3D sweater.</p>
+      <label class="btn sm" for="st-file">Upload a photo</label>
       <input type="file" id="st-file" accept="image/*" hidden></div>`;
     $('#st-file').onchange = (e) => e.target.files[0] && usePhoto(e.target.files[0]);
-    if ($('#st-reread')) $('#st-reread').onclick = () => applyPhoto();
   }
 }
 
 async function usePhoto(file) {
   const { loadPhoto } = await import('./photo.js');
   try { ui.photo = await loadPhoto(file); } catch { toast('That file could not be opened as a photo'); return; }
-  showPhoto(); applyPhoto();
+  ui.seg = null; showPhoto(); applyPhoto();
 }
 async function applyPhoto() {
   const { analyze } = await import('./photo.js');
+  if (ui.seg) ui.photo.getContext('2d').putImageData(ui.seg.orig, 0, 0); // analyze the untouched photo
   const r = analyze(ui.photo);
-  if (!r) { toast('Could not find the sweater. Tap the photo to pick colors.'); panel(); return; }
-  const d = db.current; d.zones = r.zones; d.pattern = r.pattern;
+  if (!r) { toast('Could not find a sweater in this photo. Try one with a plain background.'); panel(); return; }
+  const d = db.current; d.zones = r.zones; d.pattern = r.pattern; ui.seg = r.seg;
   ui.area = r.pattern ? 'p0' : 'body';
-  save(); studio?.applyColors(); panel();
-  toast(r.pattern ? `Found ${r.pattern.palette.length} colors in your photo` : 'Matched the color from your photo');
+  save(); refresh(); panel();
+  toast('Tap a part of the photo, then pick a color');
+}
+function savePhoto() {
+  ui.photo.toBlob(async (blob) => {
+    const file = new File([blob], 'sweater-recolored.jpg', { type: 'image/jpeg' });
+    if (navigator.canShare?.({ files: [file] })) { try { await navigator.share({ files: [file] }); } catch { /* cancelled */ } return; }
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = file.name; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  }, 'image/jpeg', 0.92);
 }
 function showPhoto() {
   const stage = $('#stage'); if (!stage) return;
   $('.photo', stage)?.remove();
   if (!ui.photo) return;
   const box = document.createElement('div'); box.className = 'photo';
-  box.append(ui.photo); box.insertAdjacentHTML('beforeend', '<span>tap to pick a color</span>');
+  box.append(ui.photo); box.insertAdjacentHTML('beforeend', '<span>your photo</span>');
   stage.append(box);
   ui.photo.onpointerdown = async (e) => {
     e.stopPropagation();
-    const { colorAt } = await import('./photo.js');
+    if (!ui.seg) return;
+    if (ui.mode !== 'photo') { ui.mode = 'photo'; panel(); return; }
+    const { labelAt } = await import('./photo.js');
     const r = ui.photo.getBoundingClientRect();
-    setColor(colorAt(ui.photo, (e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height));
+    const k = labelAt(ui.photo, ui.seg, (e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height);
+    if (k === 255) { toast('Tap on the sweater itself'); return; }
+    const a = ui.seg.areas[k], pat = db.current.pattern;
+    ui.area = a[0] === 'p' || a === 'body' ? (pat ? 'p' + ((Number(a.slice(1)) || 0) % pat.palette.length) : 'body') : a;
+    panel();
   };
 }
 
@@ -373,7 +404,7 @@ function renderStudio() {
       <div class="modes"><button data-m="colors">Colors</button><button data-m="shape">Shape</button><button data-m="photo">From photo</button></div></div>
   </div>`;
   $$('.modes button').forEach((b) => (b.onclick = () => { ui.mode = b.dataset.m; panel(); }));
-  $('#st-reset').onclick = () => { db.current = DEFAULT_DESIGN(); ui.photo = null; ui.area = 'body'; save(); showPhoto(); studio.design = db.current; studio.build(); panel(); toast('Started a fresh sweater'); };
+  $('#st-reset').onclick = () => { db.current = DEFAULT_DESIGN(); ui.photo = null; ui.seg = null; ui.area = 'body'; save(); showPhoto(); studio.design = db.current; studio.build(); panel(); toast('Started a fresh sweater'); };
   $('#st-save').onclick = () => {
     if (!studio) return;
     const thumb = studio.snapshot();

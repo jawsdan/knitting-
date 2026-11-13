@@ -3,7 +3,7 @@
 A knitting companion that installs on your phone like an app. Plain HTML, CSS and JavaScript, no build step.
 
 - **Home / Stash / Projects / Patterns**: track projects with a row counter, your yarn and tools, and saved patterns.
-- **Studio**: a 3D sweater you can spin with your finger. Tap a part (body, sleeves, collar, cuffs, hem, or a stripe) and pick a color. Change fit, length and neck. Upload a photo of a sweater to copy its colors and stripes onto the model, then recolor each area.
+- **Studio**: a 3D sweater you can spin with your finger. Tap a part (body, sleeves, collar, cuffs, hem, or a stripe) and pick a color. Change fit, length and neck. Upload a photo of a sweater: its colors and stripes go onto the model, and when you recolor an area the photo itself is recolored to match (and can be saved).
 
 Everything you add is saved on your device (localStorage).
 
