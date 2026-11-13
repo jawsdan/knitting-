@@ -6,7 +6,8 @@ const LEN = { cropped: 0.42, regular: 0.62, long: 0.84 };
 const NECK = { crew: { h: 0.07, dip: 0.075 }, turtle: { h: 0.25, dip: 0.02 } };
 const YS = 0.4, NY = 0.58, NRX = 0.17, NRZ = 0.15, VS = 0.8, HEM = 0.13, CUFF = 0.12;
 const STITCH_W = 0.022, STITCH_H = 0.019;
-export const PATTERN_ROWS = 48;
+import { PATTERN_ROWS, GRID_W } from './grid.js';
+export { PATTERN_ROWS };
 
 const TAU = Math.PI * 2;
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -196,6 +197,23 @@ export class Studio {
     return c;
   }
 
+  // full stitch chart (from a photo): one cell per stitch across the front, mirrored onto the back
+  chartCanvas(n) {
+    const pat = this.design.pattern, half = Math.round(this.cols / 2), tw = 16, th = 14, c = document.createElement('canvas');
+    c.width = half * tw; c.height = n * th;
+    const x = c.getContext('2d');
+    for (let r = 0; r < n; r++) {
+      const gr = Math.min(PATTERN_ROWS - 1, Math.floor(r / n * PATTERN_ROWS));
+      for (let s = 0; s < half; s++) {
+        const gc = GRID_W - 1 - Math.min(GRID_W - 1, Math.floor(s / half * GRID_W)); // u runs right-to-left across the front
+        x.fillStyle = pat.palette[pat.grid[gr * GRID_W + gc]] || '#888'; x.fillRect(s * tw, r * th, tw, th);
+      }
+    }
+    x.globalCompositeOperation = 'multiply';
+    for (let r = 0; r < n; r++) for (let s = 0; s < half; s++) x.drawImage(this.tiles.knit, s * tw, r * th, tw, th);
+    return c;
+  }
+
   applyColors() {
     const d = this.design, pat = d.pattern;
     for (const m of this.group.children) {
@@ -207,14 +225,19 @@ export class Studio {
       const tile = ribbed ? this.tiles.rib : this.tiles.knit;
       mat.bumpMap = tex(tile, cols, rows, false);
       if (pat && !ribbed) {
-        const canvas = z === 'body'
-          ? this.stripeCanvas(rows, (r) => Math.min(PATTERN_ROWS - 1, Math.floor(r / rows * PATTERN_ROWS)))
-          : this.stripeCanvas(rows, (r) => this.sleeveRow((r + 0.5) / rows));
-        mat.map = tex(canvas, cols, 1, true);
+        if (z === 'body' && pat.grid) {
+          mat.map = tex(this.chartCanvas(rows), 2, 1, true);
+          mat.map.wrapS = THREE.MirroredRepeatWrapping;
+        } else {
+          const canvas = z === 'body'
+            ? this.stripeCanvas(rows, (r) => Math.min(PATTERN_ROWS - 1, Math.floor(r / rows * PATTERN_ROWS)))
+            : this.stripeCanvas(rows, (r) => this.sleeveRow((r + 0.5) / rows));
+          mat.map = tex(canvas, cols, 1, true);
+        }
         mat.color.set('#ffffff');
       } else {
         mat.map = tex(tile, cols, rows, true);
-        mat.color.set(d.zones[z] || '#888888');
+        mat.color.set((ribbed && pat?.rib ? pat.palette[pat.rib[z]] : d.zones[z]) || '#888888');
       }
       mat.sheenColor.copy(mat.color).lerp(new THREE.Color('#ffffff'), 0.5);
       mat.needsUpdate = true;
@@ -277,8 +300,12 @@ export class Studio {
     if (pat && (z === 'body' || z === 'sleeves')) {
       const fromTop = 1 - hit.uv.y;
       const row = z === 'body' ? Math.min(PATTERN_ROWS - 1, Math.floor(fromTop * PATTERN_ROWS)) : this.sleeveRow(fromTop);
-      this.onPick('p' + pat.rows[row]);
-    } else this.onPick(z);
+      if (z === 'body' && pat.grid) {
+        const t = (hit.uv.x * 2) % 2, tt = t <= 1 ? t : 2 - t;
+        this.onPick('p' + pat.grid[row * GRID_W + (GRID_W - 1 - Math.min(GRID_W - 1, Math.floor(tt * GRID_W)))]);
+      } else this.onPick('p' + pat.rows[row]);
+    } else if (pat?.rib) this.onPick('p' + pat.rib[z]);
+    else this.onPick(z);
   }
 
   tick() {

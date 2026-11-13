@@ -357,7 +357,8 @@ function areas() {
   const d = db.current;
   const ribs = ['collar', 'cuffs', 'hem'].map((z) => ({ id: z, label: ZONE_LABEL[z], color: d.zones[z] }));
   if (!d.pattern) return [{ id: 'body', label: 'Body', color: d.zones.body }, { id: 'sleeves', label: 'Sleeves', color: d.zones.sleeves }, ...ribs];
-  return [...d.pattern.palette.map((c, i) => ({ id: 'p' + i, label: 'Stripe ' + (i + 1), color: c })), ...ribs];
+  const word = d.pattern.kind === 'photo' ? 'Color ' : 'Stripe ';
+  return [...d.pattern.palette.map((c, i) => ({ id: 'p' + i, label: word + (i + 1), color: c })), ...(d.pattern.rib ? [] : ribs)];
 }
 function paintPhoto() {
   if (!ui.photo || !ui.seg) return;
@@ -433,7 +434,7 @@ function panel() {
     $('#st-dl').onclick = savePhoto;
   } else {
     body.innerHTML = `<div class="photo-pane">
-      <p>Upload a photo of a sweater. Tap a part of it, pick a color, and the photo is recolored with the same colors as the 3D sweater.</p>
+      <p>Upload a photo with the garment in the middle. The app finds the garment and its pattern colors. Tap a color in the photo, pick a new one, and only the garment changes. The 3D sweater gets the same pattern.</p>
       <label class="btn sm" for="st-file">Upload a photo</label>
       <input type="file" id="st-file" accept="image/*" hidden></div>`;
     $('#st-file').onchange = (e) => e.target.files[0] && usePhoto(e.target.files[0]);
@@ -451,9 +452,9 @@ async function applyPhoto() {
   const r = analyze(ui.photo);
   if (!r) { toast('Could not find a sweater in this photo. Try one with a plain background.'); panel(); return; }
   const d = db.current; d.zones = r.zones; d.pattern = r.pattern; ui.seg = r.seg;
-  ui.area = r.pattern ? 'p0' : 'body';
+  ui.area = r.pattern ? 'p0' : 'all';
   save(); refresh(); panel();
-  toast('Tap a part of the photo, then pick a color');
+  toast(r.pattern ? `Found ${r.pattern.palette.length} colors. Tap one in the photo, then pick a new color.` : 'Pick a color to recolor the garment');
 }
 function savePhoto() {
   ui.photo.toBlob(async (blob) => {
@@ -477,9 +478,9 @@ function showPhoto() {
     const { labelAt } = await import('./photo.js');
     const r = ui.photo.getBoundingClientRect();
     const k = labelAt(ui.photo, ui.seg, (e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height);
-    if (k === 255) { toast('Tap on the sweater itself'); return; }
+    if (k === 255) { toast('Tap on the garment itself'); return; }
     const a = ui.seg.areas[k], pat = db.current.pattern;
-    ui.area = a[0] === 'p' || a === 'body' ? (pat ? 'p' + ((Number(a.slice(1)) || 0) % pat.palette.length) : 'body') : a;
+    ui.area = a[0] === 'p' || a === 'body' ? (pat ? 'p' + ((Number(a.slice(1)) || 0) % pat.palette.length) : 'all') : a;
     panel();
   };
 }
